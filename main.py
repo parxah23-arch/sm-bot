@@ -1,31 +1,16 @@
-import time
-import os
-import threading
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import requests
-from flask import Flask
 
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Бот активен и сканирует рынок 24/7!"
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = "8938113316:AAH5MYho79ykj244FLvSXfWBZo4MfZh-Jc"
+TELEGRAM_CHAT_ID = "8578491445"
 MONETS = ['XAUUSD', 'GER40']  
 exchange = ccxt.bingx({'enableRateLimit': True})
 
 def send_telegram_message(message):
     url = f"https://telegram.org{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
-    try: requests.post(url, json=payload)
+    try: requests.post(url, json=payload, timeout=10)
     except: pass
 
 def get_candles(symbol, timeframe):
@@ -57,36 +42,28 @@ def detect_choch_5m(df):
 
 def check_trend_1h(df):
     if df is None or len(df) < 50: return "NEUTRAL"
-    df['ema'] = ta.ema(df['close'], length=50)
-    return "LONG" if df['close'].iloc[-1] > df['ema'].iloc[-1] else "SHORT"
+    ema = df['close'].ewm(span=50, adjust=False).mean()
+    return "LONG" if df['close'].iloc[-1] > ema.iloc[-1] else "SHORT"
 
-def monitor_market():
-    last_signals = {monet: None for monet in MONETS}
-    while True:
-        for monet in MONETS:
-            df_1h = get_candles(monet, '1h')
-            df_15m = get_candles(monet, '15m')
-            df_5m = get_candles(monet, '5m')
+def check_market_once():
+    # Проверяем рынок один раз (без бесконечного цикла)
+    for monet in MONETS:
+        df_1h = get_candles(monet, '1h')
+        df_15m = get_candles(monet, '15m')
+        df_5m = get_candles(monet, '5m')
+        
+        if df_1h is None or df_15m is None or df_5m is None: continue
             
-            if df_1h is None or df_15m is None or df_5m is None: continue
-                
-            trend_1h = check_trend_1h(df_1h)
-            fvg_15m = check_fvg_15m(df_15m)
-            choch_5m = detect_choch_5m(df_5m)
-            
-            if trend_1h == "LONG" and fvg_15m == "BULLISH_FVG" and choch_5m == "BULLISH_CHOCH":
-                if last_signals[monet] != f"{monet}_LONG":
-                    send_telegram_message(f"🟢 *SMART MONEY: LONG*\n📊 #{monet}\n📈 1H: LONG\n⏳ 15M: Тест FVG\n⚡️ 5M: Слом CHOCH!")
-                    last_signals[monet] = f"{monet}_LONG"
-            elif trend_1h == "SHORT" and fvg_15m == "BEARISH_FVG" and choch_5m == "BEARISH_CHOCH":
-                if last_signals[monet] != f"{monet}_SHORT":
-                    send_telegram_message(f"🔴 *SMART MONEY: SHORT*\n📊 #{monet}\n📉 1H: SHORT\n⏳ 15M: Тест FVG\n⚡️ 5M: Слом CHOCH!")
-                    last_signals[monet] = f"{monet}_SHORT"
-            elif choch_5m is None and fvg_15m is None:
-                last_signals[monet] = None
-                
-        time.sleep(60)
+        trend_1h = check_trend_1h(df_1h)
+        fvg_15m = check_fvg_15m(df_15m)
+        choch_5m = detect_choch_5m(df_5m)
+        
+        if trend_1h == "LONG" and fvg_15m == "BULLISH_FVG" and choch_5m == "BULLISH_CHOCH":
+            send_telegram_message(f"🟢 *SMART MONEY: LONG*\n📊 #{monet}\n📈 1H: LONG\n⏳ 15M: Тест FVG\n⚡️ 5M: Слом CHOCH!")
+        elif trend_1h == "SHORT" and fvg_15m == "BEARISH_FVG" and choch_5m == "BEARISH_CHOCH":
+            send_telegram_message(f"🔴 *SMART MONEY: SHORT*\n📊 #{monet}\n📉 1H: SHORT\n⏳ 15M: Тест FVG\n⚡️ 5M: Слом CHOCH!")
 
 if __name__ == "__main__":
-    threading.Thread(target=run_web_server, daemon=True).start()
-    monitor_market()
+    # Отправляем один тестовый сигнал при первом запуске
+    send_telegram_message("👋 Бот успешно перенесен на Render и начинает круглосуточную проверку каждые 5 минут!")
+    check_market_once()
